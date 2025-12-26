@@ -29,6 +29,7 @@ docker run -d --name hcloud-snapshot-as-backup \
   -e LABEL_SELECTOR="AUTOBACKUP" \
   -e KEEP_LAST=3 \
   -e CRON="0 1 * * *" \
+  -e HEALTHCHECKS_IO="https://hc-ping.com/...."\
   fbrettnich/hcloud-snapshot-as-backup
 ```
 
