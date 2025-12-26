@@ -13,6 +13,7 @@ For ease of use, the script works with the powerful labels directly in the Hetzn
   - [Add label to servers that should be backed up](#add-label-to-servers-that-should-be-backed-up)
   - [Choose a name for your snapshots (optional)](#choose-a-name-for-your-snapshots-optional)
   - [Docker: Specify how often the script should be executed via cron](#docker-specify-how-often-the-script-should-be-executed-via-cron)
+  - [Monitor script execution with Healthchecks.io (optional)](#monitor-script-execution-with-healthchecksio-optional)
 - [About Labels](#about-labels)
 - [Why is this script useful?](#why-is-this-script-useful)
 
@@ -148,6 +149,41 @@ For example:
 0 1 * * *
 ```
 This cron executes the script every day at 1am.  
+
+### Monitor script execution with Healthchecks.io (optional)
+You can optionally configure the script to report execution status to [Healthchecks.io](https://healthchecks.io/), a monitoring service that alerts you when your scheduled tasks fail or don't run on time.
+
+**How it works:**
+- The script sends a success ping to Healthchecks.io when the backup process completes without errors
+- The script sends a failure ping when errors occur during execution
+- If the script doesn't run (e.g., container crashes), Healthchecks.io will detect the missed check and alert you
+
+**Setup:**
+
+1. **Create a check on Healthchecks.io**
+   - Sign up at [healthchecks.io](https://healthchecks.io/) (free tier available)
+   - Create a new check and copy the ping URL (format: `https://hc-ping.com/your-uuid-here`)
+
+2. **Configure in Docker:**
+   - Add the `HEALTHCHECKS_IO` environment variable with your ping URL:
+   ```yaml
+   environment:
+     - HEALTHCHECKS_IO=https://hc-ping.com/your-uuid-here
+   ```
+   - Or in docker run command:
+   ```bash
+   -e HEALTHCHECKS_IO="https://hc-ping.com/your-uuid-here"
+   ```
+
+3. **Configure without Docker:**
+   - Add the `healthchecks-io` field to your `config.json`:
+   ```json
+   {
+     "healthchecks-io": "https://hc-ping.com/your-uuid-here"
+   }
+   ```
+
+**Note:** This feature is completely optional. If `HEALTHCHECKS_IO` (Docker) or `healthchecks-io` (config.json) is not set or empty, the script will run normally without any monitoring.
 
 ## About Labels  
 This script works with the powerful Hetzner Labels.  
