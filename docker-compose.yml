@@ -11,3 +11,4 @@ services:
         - SNAPSHOT_NAME="%name%-%timestamp%"
         - KEEP_LAST=3
         - CRON=0 1 * * *
+        - HEALTHCHECKS_IO=

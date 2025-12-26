@@ -17,6 +17,7 @@ servers = {}
 servers_keep_last = {}
 snapshot_list = {}
 exit_code = 0
+healthchecks_io_url = None
 
 
 def get_servers(page=1):
@@ -120,40 +121,75 @@ def delete_snapshots(snapshot_id, server_id):
         print(f"Snapshot #{snapshot_id} (Server #{server_id}) was successfully deleted")
 
 
+def ping_healthchecks(success=True):
+    """Ping healthchecks.io to report success or failure"""
+    global healthchecks_io_url
+    if healthchecks_io_url is None or healthchecks_io_url == "":
+        return
+    
+    try:
+        if success:
+            url = healthchecks_io_url
+        else:
+            # Append /fail for failure reporting
+            url = healthchecks_io_url.rstrip('/') + '/fail'
+        
+        requests.get(url, timeout=10)
+    except requests.RequestException as e:
+        # Log ping failure but don't affect main script execution
+        print(f"Healthchecks.io ping failed: {e}")
+
+
 def run():
     global exit_code
+    # Reset exit_code at the start of each run
+    exit_code = 0
+    
     if api_token is None:
         print("API token is missing... Exit.")
+        ping_healthchecks(success=False)
         sys.exit(1)
 
-    servers.clear()
-    servers_keep_last.clear()
-    snapshot_list.clear()
-    headers['Content-Type'] = "application/json"
-    headers['Authorization'] = "Bearer " + api_token
+    try:
+        servers.clear()
+        servers_keep_last.clear()
+        snapshot_list.clear()
+        headers['Content-Type'] = "application/json"
+        headers['Authorization'] = "Bearer " + api_token
 
-    get_servers()
+        get_servers()
 
-    if not servers:
-        print("No servers found with label")
+        if not servers:
+            print("No servers found with label")
 
-    for server in servers:
-        create_snapshot(
-            server_id=server,
-            snapshot_desc=str(snapshot_name)
-            .replace("%id%", str(server))
-            .replace("%name%", servers[server]['name'])
-            .replace("%timestamp%", str(int(time.time())))
-            .replace("%date%", str(time.strftime("%Y-%m-%d")))
-            .replace("%time%", str(time.strftime("%H:%M:%S")))
-        )
+        for server in servers:
+            create_snapshot(
+                server_id=server,
+                snapshot_desc=str(snapshot_name)
+                .replace("%id%", str(server))
+                .replace("%name%", servers[server]['name'])
+                .replace("%timestamp%", str(int(time.time())))
+                .replace("%date%", str(time.strftime("%Y-%m-%d")))
+                .replace("%time%", str(time.strftime("%H:%M:%S")))
+            )
 
-    get_snapshots()
+        get_snapshots()
 
-    if not snapshot_list:
-        print("No snapshots found with label")
+        if not snapshot_list:
+            print("No snapshots found with label")
 
-    cleanup_snapshots()
+        cleanup_snapshots()
+        
+        # Report success if no errors occurred
+        if exit_code == 0:
+            ping_healthchecks(success=True)
+        else:
+            ping_healthchecks(success=False)
+    except Exception as e:
+        print(f"Unexpected error occurred: {e}")
+        exit_code = 1
+        ping_healthchecks(success=False)
+        raise
 
 
 if __name__ == '__main__':
@@ -165,6 +201,7 @@ if __name__ == '__main__':
         snapshot_name = os.environ.get('SNAPSHOT_NAME', "%name%-%timestamp%")
         label_selector = os.environ.get('LABEL_SELECTOR', 'AUTOBACKUP')
         keep_last_default = int(os.environ.get('KEEP_LAST', 3))
+        healthchecks_io_url = os.environ.get('HEALTHCHECKS_IO') or None
 
         cron_string = os.environ.get('CRON', '0 1 * * *')
 
@@ -182,7 +219,12 @@ if __name__ == '__main__':
                         print("Script is now executed by cron...")
                         run()
                 except KeyboardInterrupt:
+                    ping_healthchecks(success=False)
                     sys.exit(0)
+                except Exception as e:
+                    print(f"Error in cron execution: {e}")
+                    ping_healthchecks(success=False)
+                    exit_code = 1
 
                 time.sleep(1)
 
@@ -196,4 +238,5 @@ if __name__ == '__main__':
         keep_last_default = int(config['keep-last'])
 
         run()
+        ping_healthchecks(success=(exit_code == 0))
         sys.exit(exit_code)
