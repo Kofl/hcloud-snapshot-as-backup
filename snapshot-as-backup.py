@@ -26,9 +26,11 @@ def get_servers(page=1):
     r = requests.get(url=url, headers=headers)
 
     if not r.ok:
-        print(f"Servers Page #{page} could not be retrieved: {r.reason}")
+        error_msg = f"Servers Page #{page} could not be retrieved: {r.reason}"
+        print(error_msg)
         print(r.text)
         exit_code = 1
+        return error_msg
 
     else:
         r = r.json()
@@ -47,7 +49,8 @@ def get_servers(page=1):
             servers_keep_last[s['id']] = keep_last
 
         if np is not None:
-            get_servers(np)
+            return get_servers(np)
+    return None
 
 
 def create_snapshot(server_id, snapshot_desc):
@@ -60,12 +63,15 @@ def create_snapshot(server_id, snapshot_desc):
     )
 
     if not r.ok:
-        print(f"Snapshot for Server #{server_id} could not be created: {r.reason}")
+        error_msg = f"Snapshot for Server #{server_id} could not be created: {r.reason}"
+        print(error_msg)
         print(r.text)
         exit_code = 1
+        return error_msg
     else:
         image_id = r.json()['image']['id']
         print(f"Snapshot #{image_id} (Server #{server_id}) has been created")
+        return None
 
 
 def get_snapshots(page=1):
@@ -74,9 +80,11 @@ def get_snapshots(page=1):
     r = requests.get(url=url, headers=headers)
 
     if not r.ok:
-        print(f"Snapshots Page #{page} could not be retrieved: {r.reason}")
+        error_msg = f"Snapshots Page #{page} could not be retrieved: {r.reason}"
+        print(error_msg)
         print(r.text)
         exit_code = 1
+        return error_msg
 
     else:
         r = r.json()
@@ -89,10 +97,12 @@ def get_snapshots(page=1):
                 snapshot_list[i['created_from']['id']] = [i['id']]
 
         if np is not None:
-            get_snapshots(np)
+            return get_snapshots(np)
+    return None
 
 
 def cleanup_snapshots():
+    errors = []
     for k in snapshot_list:
         si = snapshot_list[k]
         keep_last = keep_last_default
@@ -105,7 +115,10 @@ def cleanup_snapshots():
             si = si[keep_last:]
 
             for s in si:
-                delete_snapshots(snapshot_id=s, server_id=k)
+                error = delete_snapshots(snapshot_id=s, server_id=k)
+                if error:
+                    errors.append(error)
+    return errors
 
 
 def delete_snapshots(snapshot_id, server_id):
@@ -114,15 +127,18 @@ def delete_snapshots(snapshot_id, server_id):
     r = requests.delete(url=url, headers=headers)
 
     if not r.ok:
-        print(f"Snapshot #{snapshot_id} (Server #{server_id}) could not be deleted: {r.reason}")
+        error_msg = f"Snapshot #{snapshot_id} (Server #{server_id}) could not be deleted: {r.reason}"
+        print(error_msg)
         print(r.text)
         exit_code = 1
+        return error_msg
     else:
         print(f"Snapshot #{snapshot_id} (Server #{server_id}) was successfully deleted")
+        return None
 
 
-def ping_healthchecks(success=True):
-    """Ping healthchecks.io to report success or failure"""
+def ping_healthchecks(success=True, diagnostic_info=None):
+    """Ping healthchecks.io to report success or failure with diagnostic information"""
     global healthchecks_io_url
     if healthchecks_io_url is None or healthchecks_io_url == "":
         return
@@ -130,11 +146,16 @@ def ping_healthchecks(success=True):
     try:
         if success:
             url = healthchecks_io_url
+            # For success, just ping without body
+            requests.post(url, timeout=10)
         else:
             # Append /fail for failure reporting
             url = healthchecks_io_url.rstrip('/') + '/fail'
-        
-        requests.get(url, timeout=10)
+            # Pass diagnostic information in POST body
+            if diagnostic_info:
+                requests.post(url, data=diagnostic_info, timeout=10)
+            else:
+                requests.post(url, timeout=10)
     except requests.RequestException as e:
         # Log ping failure but don't affect main script execution
         print(f"Healthchecks.io ping failed: {e}")
@@ -144,10 +165,12 @@ def run():
     global exit_code
     # Reset exit_code at the start of each run
     exit_code = 0
+    error_messages = []
     
     if api_token is None:
-        print("API token is missing... Exit.")
-        ping_healthchecks(success=False)
+        error_msg = "API token is missing"
+        print(f"{error_msg}... Exit.")
+        ping_healthchecks(success=False, diagnostic_info=error_msg)
         sys.exit(1)
 
     try:
@@ -157,13 +180,15 @@ def run():
         headers['Content-Type'] = "application/json"
         headers['Authorization'] = "Bearer " + api_token
 
-        get_servers()
+        error = get_servers()
+        if error:
+            error_messages.append(error)
 
         if not servers:
             print("No servers found with label")
 
         for server in servers:
-            create_snapshot(
+            error = create_snapshot(
                 server_id=server,
                 snapshot_desc=str(snapshot_name)
                 .replace("%id%", str(server))
@@ -172,23 +197,32 @@ def run():
                 .replace("%date%", str(time.strftime("%Y-%m-%d")))
                 .replace("%time%", str(time.strftime("%H:%M:%S")))
             )
+            if error:
+                error_messages.append(error)
 
-        get_snapshots()
+        error = get_snapshots()
+        if error:
+            error_messages.append(error)
 
         if not snapshot_list:
             print("No snapshots found with label")
 
-        cleanup_snapshots()
+        cleanup_errors = cleanup_snapshots()
+        if cleanup_errors:
+            error_messages.extend(cleanup_errors)
         
         # Report success if no errors occurred
         if exit_code == 0:
             ping_healthchecks(success=True)
         else:
-            ping_healthchecks(success=False)
+            # Combine all error messages for diagnostic info
+            diagnostic_info = " | ".join(error_messages) if error_messages else "Unknown error occurred"
+            ping_healthchecks(success=False, diagnostic_info=diagnostic_info)
     except Exception as e:
-        print(f"Unexpected error occurred: {e}")
+        error_msg = f"Unexpected error occurred: {str(e)}"
+        print(error_msg)
         exit_code = 1
-        ping_healthchecks(success=False)
+        ping_healthchecks(success=False, diagnostic_info=error_msg)
         raise
 
 
@@ -219,11 +253,12 @@ if __name__ == '__main__':
                         print("Script is now executed by cron...")
                         run()
                 except KeyboardInterrupt:
-                    ping_healthchecks(success=False)
+                    ping_healthchecks(success=False, diagnostic_info="Script interrupted by user (KeyboardInterrupt)")
                     sys.exit(0)
                 except Exception as e:
-                    print(f"Error in cron execution: {e}")
-                    ping_healthchecks(success=False)
+                    error_msg = f"Error in cron execution: {str(e)}"
+                    print(error_msg)
+                    ping_healthchecks(success=False, diagnostic_info=error_msg)
                     exit_code = 1
 
                 time.sleep(1)
