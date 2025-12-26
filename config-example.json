@@ -2,5 +2,6 @@
   "api-token": "",
   "snapshot-name": "%name%-%timestamp%",
   "label-selector": "AUTOBACKUP",
-  "keep-last": 3
+  "keep-last": 3,
+  "healthchecks-io": ""
 }

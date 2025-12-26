@@ -236,6 +236,7 @@ if __name__ == '__main__':
         snapshot_name = config['snapshot-name']
         label_selector = config['label-selector']
         keep_last_default = int(config['keep-last'])
+        healthchecks_io_url = config.get('healthchecks-io') or None
 
         run()
         ping_healthchecks(success=(exit_code == 0))
